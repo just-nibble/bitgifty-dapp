@@ -15,7 +15,7 @@ from rest_framework  import generics, permissions
 
 from giftCards.models import GiftCardFee
 
-from . import serializers
+from . import serializers, models
 # Create your views here.
 
 
@@ -87,3 +87,15 @@ class CreateBillPaymentAPIView(generics.GenericAPIView):
             return response.Response(payment)
         else:
             raise ValueError("something went wrong")
+
+
+class GiftCardCreateAPIView(generics.CreateAPIView):
+    permission_classes = [permissions.AllowAny,]
+    queryset = models.GiftCard.objects.all()
+    serializer_class = serializers.GiftCardSerializer
+
+
+class RedeemCreateAPIView(generics.CreateAPIView):
+    permission_classes = [permissions.AllowAny,]
+    queryset = models.Redeem.objects.all()
+    serializer_class = serializers.RedeemSerializer
