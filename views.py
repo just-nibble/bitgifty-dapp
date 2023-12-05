@@ -3,8 +3,10 @@ import re
 import secrets
 import requests
 
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
 
-from rest_framework import generics, exceptions, response
+from rest_framework import generics, exceptions, response, views
 
 from core.utils import get_naira_price, get_rate, get_flw_headers, Blockchain, get_rate_buffer
 
@@ -25,8 +27,137 @@ class GetFeesAPIView(generics.ListAPIView):
     serializer_class = serializers.FeeSerializer
     filterset_fields = ['network',]
 
+class GetBillCategoriesAPIView(views.APIView):
+    permission_classes = [permissions.AllowAny,]
+    bill_type = openapi.Parameter('bill-type', openapi.IN_QUERY, description="example: airtime, data_bundle", type=openapi.TYPE_STRING)
+    provider = openapi.Parameter('provider', openapi.IN_QUERY, description="example: MTN, GLO, Airtel, 9Mobile", type=openapi.TYPE_STRING)
+    
+    response_schema_dict = {
+        "201": openapi.Response(
+            description="Htpp 201 description",
+            examples={
+            "status": "success",
+            "message": "bill categories retrieval successful",
+            "data": [
+                {
+                "id": 1,
+                "biller_code": "BIL099",
+                "name": "MTN NIgeria",
+                "default_commission": 0.02,
+                "date_added": "2018-07-03T00:00:00Z",
+                "country": "NG",
+                "is_airtime": True,
+                "biller_name": "AIRTIME",
+                "item_code": "AT099",
+                "short_name": "MTN",
+                "fee": 0,
+                "commission_on_fee": False,
+                "label_name": "Mobile Number",
+                "amount": 0
+            },
+            {
+                "id": 2,
+                "biller_code": "BIL099",
+                "name": "GLO Nigeria",
+                "default_commission": 0.025,
+                "date_added": "2018-07-03T00:00:00Z",
+                "country": "NG",
+                "is_airtime": True,
+                "biller_name": "AIRTIME",
+                "item_code": "AT099",
+                "short_name": "GLO",
+                "fee": 0,
+                "commission_on_fee": False,
+                "label_name": "Mobile Number",
+                "amount": 0
+            },
+            {
+                "id": 9,
+                "biller_code": "BIL119",
+                "name": "DSTV BoxOffice",
+                "default_commission": 0.3,
+                "date_added": "2018-08-17T00:00:00Z",
+                "country": "NG",
+                "is_airtime": False,
+                "biller_name": "DSTV BOX OFFICE",
+                "item_code": "CB140",
+                "short_name": "Box Office",
+                "fee": 100,
+                "commission_on_fee": True,
+                "label_name": "Smart Card Number",
+                "amount": 0
+            },
+        ]
+            }
+        ),
+
+        "500": openapi.Response(
+            description="Htpp 500 description",
+            examples={
+                "application/json": {
+                    "key_1": "error message 1",
+                    "key_2": "error message 2",
+                }
+            }
+        ),
+    }
+
+    def make_request(self, bill_type: str, provider: str):
+        biller_code = {
+            "MTN": "BIL099",
+            "GLO": "BIL102",
+            "Airtel": "BIL100",
+            "9Mobile": "BIL103",
+        }
+
+        params = {
+            bill_type: 1
+        }
+
+        if provider:
+            params["biller_code"] = biller_code[provider]
+
+        
+        r = requests.get(
+            url="https://api.flutterwave.com/v3/bill-categories",
+            params=params,
+            headers=get_flw_headers()
+        )
+
+        response = r.json()
+        
+        if response.get("status") != "success":
+            raise ValueError("error getting bill category")
+        return response
+
+    @swagger_auto_schema(manual_parameters=[bill_type, provider], )
+    def get(self, *args, **kwargs):     
+        bill_type = self.request.query_params.get('bill-type')
+        provider = self.request.query_params.get('provider')
+        
+        res = self.make_request(bill_type, provider)
+        return response.Response(res)
+
+
+class ValidateBillServiceAPIView(views.APIView):
+    permission_classes = [permissions.AllowAny,]
+    item_code = openapi.Parameter('item-code', openapi.IN_QUERY, description="get item code from get bill category", type=openapi.TYPE_STRING)
+    
+    def validate_bill(self, item_code: str):
+        url = f"https://api.flutterwave.com/v3/bill-items/{item_code}/validate"
+        req = requests.get(url=url, headers=get_flw_headers())
+        resp = req.json()
+        return resp
+
+    @swagger_auto_schema(manual_parameters=[item_code], )
+    def get(self, *args, **kwargs):
+        item_code = self.request.query_params.get('item-code')
+        validate = self.validate_bill(item_code)
+        return response.Response(validate)
+ 
 
 class CreateBillPaymentAPIView(generics.GenericAPIView):
+    permission_classes = [permissions.AllowAny,]
     serializer_class = serializers.CreateBillPaymentSerializer
 
     def initiate_payment(
@@ -89,7 +220,7 @@ class CreateBillPaymentAPIView(generics.GenericAPIView):
             raise ValueError("something went wrong")
 
 
-class GiftCardCreateAPIView(generics.CreateAPIView):
+class GiftCardCreateAPIView(generics.ListCreateAPIView):
     permission_classes = [permissions.AllowAny,]
     queryset = models.GiftCard.objects.all()
     serializer_class = serializers.GiftCardSerializer

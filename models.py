@@ -20,6 +20,7 @@ class GiftCard(models.Model):
     currency = models.CharField(max_length=255)
     amount = models.FloatField(default=0.0)
     image = models.ForeignKey(GiftCardImage, on_delete=models.SET_NULL, null=True, related_name="dapp_image")
+    sender_email = models.EmailField(null=True, blank=True)
     receipent_email = models.EmailField(null=True, blank=True)
     note = models.TextField(null=True, blank=True)
     code = models.CharField(max_length=255, null=True, blank=True)
@@ -41,13 +42,15 @@ class GiftCard(models.Model):
                     if self.note:
                         note = self.note
                     html_message = render_to_string(
-                        'giftcardtemplate.html',
+                        'giftcardtemplate_v2.html',
                         {   
                             'image': self.image.link,
                             'receipent_email': self.receipent_email,
-                            'sender_email': self.wallet.owner.email,
+                            'sender_email': self.sender_email,
                             'code': self.code,
                             'note': note,
+                            'amount': self.amount,
+                            'currency': self.currency,
                         }
                     )
                     
@@ -83,7 +86,7 @@ class Redeem(models.Model):
         TATUM_API_KEY = os.getenv("TATUM_API_KEY")
         client = Blockchain(TATUM_API_KEY, os.getenv("BIN_KEY"), os.getenv("BIN_SECRET"))
         admin_wallet = AdminWallet.objects.get(owner__username=f"{os.getenv('ADMIN_USERNAME')}", network=giftcard.currency.title())
-        amount = str(giftcard.amount - fee)
+        amount = str(float(giftcard.amount) - fee)
     
         return client.redeem_gift_card(
             code, admin_wallet.private_key, amount,
@@ -101,7 +104,7 @@ class Redeem(models.Model):
 
                 subject = "Gift Card Redeemed"
                 html_message = render_to_string(
-                    'giftcard_redeem.html',
+                    'giftcard_redeem_v2.html',
                     {
                         'receipent_email': giftcard.receipent_email,
                         'code': self.code,
