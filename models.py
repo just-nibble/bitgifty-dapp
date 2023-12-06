@@ -70,6 +70,28 @@ class Redeem(models.Model):
     redemption_date = models.DateTimeField(auto_now_add=True, null=True)
 
     def redeem_giftcard(self, code):
+        network_mapping = {
+            "ceur": {
+                "virt": "CEUR",
+                "wallet": "celo",
+            },
+            "cusd": {
+                "virt": "CUSD",
+                "wallet": "celo",
+            },
+            "usdt_tron": {
+                "virt": "USDT_TRON",
+                "wallet": "tron"
+            },
+            "tron": {
+                "virt": "TRON",
+                "wallet": "tron"
+            },
+            "eth": {
+                "virt": "ETH",
+                "wallet": "ethereum"
+            },
+        }
         try:
             giftcard = GiftCard.objects.get(code=code)
         except GiftCard.DoesNotExist:
@@ -85,7 +107,7 @@ class Redeem(models.Model):
 
         TATUM_API_KEY = os.getenv("TATUM_API_KEY")
         client = Blockchain(TATUM_API_KEY, os.getenv("BIN_KEY"), os.getenv("BIN_SECRET"))
-        admin_wallet = AdminWallet.objects.get(owner__username=f"{os.getenv('ADMIN_USERNAME')}", network=giftcard.currency.title())
+        admin_wallet = AdminWallet.objects.get(owner__username=f"{os.getenv('ADMIN_USERNAME')}", network__icontains=network_mapping[giftcard.currency.lower()]["wallet"])
         amount = str(float(giftcard.amount) - fee)
     
         return client.redeem_gift_card(

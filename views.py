@@ -198,26 +198,32 @@ class CreateBillPaymentAPIView(generics.GenericAPIView):
             email = serializer.validated_data['email']
             wallet_address = serializer.validated_data['wallet_address']
             
-            payment = self.initiate_payment(
-                bill_type=bill_type,
-                country=country,
-                customer=customer,
-                amount=amount,
-            )
-
-            transaction = Transaction(
-                amount=amount,
-                currency=chain,
-                currency_type="crypto",
-                status='pending',
-                transaction_type=f"{bill_type} dapp",
-                email=email,
-                wallet_address=wallet_address
-            )
-            transaction.save()
+            try:
+                payment = self.initiate_payment(
+                    bill_type=bill_type,
+                    country=country,
+                    customer=customer,
+                    amount=amount,
+                )
+            except Exception as exception:
+                raise ValueError(exception)
+            
+            try:
+                transaction = Transaction(
+                    amount=amount,
+                    currency=chain,
+                    currency_type="crypto",
+                    status='pending',
+                    transaction_type=f"{bill_type} dapp",
+                    email=email,
+                    wallet_address=wallet_address
+                )
+                transaction.save()
+            except Exception as exception:
+                raise ValueError("Transaction failed to save")
             return response.Response(payment)
         else:
-            raise ValueError("something went wrong")
+            raise exceptions.ValidationError("You aren't passing in a value correctly")
 
 
 class GiftCardCreateAPIView(generics.ListCreateAPIView):
