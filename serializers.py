@@ -18,7 +18,7 @@ class CreateBillPaymentSerializer(serializers.Serializer):
     customer = serializers.CharField()
     country = serializers.CharField()
     chain = serializers.CharField()
-    email = serializers.EmailField()
+    email = serializers.EmailField(required=False)
     wallet_address = serializers.CharField()
 
     class Meta:
