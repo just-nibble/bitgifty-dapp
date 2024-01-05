@@ -9,4 +9,5 @@ urlpatterns = [
     path('validate-bill-service/', views.ValidateBillServiceAPIView.as_view()),
     path('create-giftcard/', views.GiftCardCreateAPIView.as_view()),
     path('redeem-giftcard/', views.RedeemCreateAPIView.as_view()),
+    path('transactions/', views.TransactionAPIView.as_view()),
 ]

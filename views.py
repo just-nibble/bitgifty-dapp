@@ -8,10 +8,8 @@ from drf_yasg.utils import swagger_auto_schema
 
 from rest_framework import generics, exceptions, response, views
 
-from core.utils import get_naira_price, get_rate, get_flw_headers, Blockchain, get_rate_buffer
+from core.utils import get_flw_headers
 
-from transactions.models import Transaction
-from wallets.models import VirtualAccount
 
 from rest_framework  import generics, permissions
 
@@ -166,12 +164,14 @@ class CreateBillPaymentAPIView(generics.GenericAPIView):
         ):
         url = "https://api.flutterwave.com/v3/bills"
         
+        reference = secrets.token_hex(7)
+        
         body = {
             "country": country,
             "customer": customer,
             "amount": amount,
             "type": bill_type,
-            "reference": secrets.token_hex(7)
+            "reference": reference
         }
 
         req = requests.post(
@@ -184,7 +184,7 @@ class CreateBillPaymentAPIView(generics.GenericAPIView):
         if resp.get('status') == 'error':
             raise ValueError(resp.get('message'))
 
-        return resp
+        return resp, reference
 
     def post(self, request, *args, **kwargs):
         serializer = serializers.CreateBillPaymentSerializer(data=self.request.data)
@@ -194,12 +194,14 @@ class CreateBillPaymentAPIView(generics.GenericAPIView):
             customer = serializer.validated_data['customer']
             bill_type = serializer.validated_data['bill_type']
             amount = serializer.validated_data['amount']
+            crypto_amount = serializer.validated_data['crypto_amount']
             chain = serializer.validated_data['chain']
-            email = serializer.validated_data['email']
+            email = serializer.validated_data.get('email')
             wallet_address = serializer.validated_data['wallet_address']
+            transaction_hash = serializer.validated_data['transaction_hash']
             
             try:
-                payment = self.initiate_payment(
+                payment, reference = self.initiate_payment(
                     bill_type=bill_type,
                     country=country,
                     customer=customer,
@@ -209,14 +211,25 @@ class CreateBillPaymentAPIView(generics.GenericAPIView):
                 raise ValueError(exception)
             
             try:
-                transaction = Transaction(
+                status = "pending"
+
+                if "airtime" in bill_type.lower():
+                    status = "success"
+                elif "data" in bill_type.lower():
+                    status = "success"
+
+                transaction = models.Transaction(
                     amount=amount,
                     currency=chain,
                     currency_type="crypto",
-                    status='pending',
+                    crypto_amount=crypto_amount,
+                    status=status,
                     transaction_type=f"{bill_type} dapp",
                     email=email,
-                    wallet_address=wallet_address
+                    wallet_address=wallet_address,
+                    transaction_hash=transaction_hash,
+                    ref = reference
+
                 )
                 transaction.save()
             except Exception as exception:
@@ -230,9 +243,17 @@ class GiftCardCreateAPIView(generics.ListCreateAPIView):
     permission_classes = [permissions.AllowAny,]
     queryset = models.GiftCard.objects.all()
     serializer_class = serializers.GiftCardSerializer
+    filterset_fields = ["address",]
 
 
 class RedeemCreateAPIView(generics.CreateAPIView):
     permission_classes = [permissions.AllowAny,]
     queryset = models.Redeem.objects.all()
     serializer_class = serializers.RedeemSerializer
+
+
+class TransactionAPIView(generics.ListAPIView):
+    filterset_fields = ['wallet_address',]
+    permission_classes = [permissions.AllowAny,]
+    serializer_class = serializers.TransactionSerializer
+    queryset = models.Transaction.objects.all()

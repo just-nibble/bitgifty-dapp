@@ -8,7 +8,10 @@ from django.core import mail, exceptions
 from core.utils import Blockchain
 
 from giftCards.models import GiftCardImage, GiftCardFee
-from wallets.models import AdminWallet
+from wallets.models import AdminWallet, Wallet
+
+from core.utils import Blockchain, get_flw_status
+
 
 # Create your models here.
 
@@ -71,6 +74,10 @@ class Redeem(models.Model):
 
     def redeem_giftcard(self, code):
         network_mapping = {
+            'celo': {
+                "virt": "celo",
+                "wallet": "celo",
+            },
             "ceur": {
                 "virt": "CEUR",
                 "wallet": "celo",
@@ -95,7 +102,7 @@ class Redeem(models.Model):
         try:
             giftcard = GiftCard.objects.get(code=code)
         except GiftCard.DoesNotExist:
-            raise ValueError("gift card not found")
+            raise ValueError("Giftcard not found")
         
         if giftcard.status == "used":
             raise ValueError("Giftcard has already been used")
@@ -106,39 +113,182 @@ class Redeem(models.Model):
             fee = 0.0
 
         TATUM_API_KEY = os.getenv("TATUM_API_KEY")
+        
         client = Blockchain(TATUM_API_KEY, os.getenv("BIN_KEY"), os.getenv("BIN_SECRET"))
-        admin_wallet = AdminWallet.objects.get(owner__username=f"{os.getenv('ADMIN_USERNAME')}", network__icontains=network_mapping[giftcard.currency.lower()]["wallet"])
+        
+        try:
+            admin_wallet = AdminWallet.objects.get(
+                owner__username=f"{os.getenv('ADMIN_USERNAME')}",
+                network__icontains=network_mapping[giftcard.currency.lower()]["wallet"]
+            )
+        except AdminWallet.DoesNotExist:
+            raise ValueError("Admin Wallet not found")
+        
         amount = str(float(giftcard.amount) - fee)
-    
-        return client.redeem_gift_card(
-            code, admin_wallet.private_key, amount,
-            self.address, giftcard.currency.lower(), admin_wallet.address
-        )
+
+        try:
+            return client.redeem_gift_card(
+                code, admin_wallet.private_key, amount,
+                self.address, giftcard.currency.lower(),
+                admin_wallet.address
+            )
+        except Exception as exception:
+            raise exceptions.ValidationError(exception, 400)
+
     
     def save(self, *args, **kwargs):
-        try:
-            if self._state.adding:
+        if self._state.adding:
+            try:
                 giftcard = GiftCard.objects.get(code=self.code)
-                note = giftcard.note
-                giftcard.status = "used"
+            except GiftCard.DoesNotExist:
+                raise exceptions.ValidationError("Giftcard does not exist", 404)
+            
+            note = giftcard.note
+            
+            try:
                 self.redeem_giftcard(self.code)
-                giftcard.save()
+            except Exception as exception:
+                raise exceptions.ValidationError(exception, 400)
+            
+            giftcard.status = "used"
+            
+            giftcard.save()
 
-                subject = "Gift Card Redeemed"
+            subject = "Gift Card Redeemed"
+            html_message = render_to_string(
+                'giftcard_redeem_v2.html',
+                {
+                    'receipent_email': giftcard.receipent_email,
+                    'code': self.code,
+                    'note': note,
+                }
+            )
+                
+            plain_message = strip_tags(html_message)
+            mail.send_mail(
+                subject, plain_message, f"BitGifty <{os.getenv('ADMIN_EMAIL')}>",
+                [giftcard.receipent_email], html_message=html_message
+            )
+        return super(Redeem, self).save(*args, **kwargs)
+
+
+class Transaction(models.Model):
+    amount = models.FloatField(default=0.0)
+    currency = models.CharField(max_length=255, default="naira")
+    currency_type = models.CharField(max_length=255, default="fiat")
+    crypto_amount = models.FloatField(default=0.0)
+    bank_name = models.CharField(max_length=255, null=True, blank=True)
+    account_name = models.CharField(max_length=255, null=True, blank=True)
+    status = models.CharField(max_length=255, default='pending')
+    time = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    transaction_type = models.CharField(max_length=255, null=True)
+    transaction_hash = models.CharField(max_length=255, null=True)
+    wallet_address = models.CharField(max_length=255, null=True)
+    email = models.EmailField(blank=True, null=True)
+    ref = models.CharField(max_length=255, null=True, blank=True)
+
+
+    def __str__(self):
+        return f"{self.wallet_address}: {self.email}"
+    
+    def check_flw_tran(self):
+        email = self.email
+        platform = "minipay"
+    
+        status = get_flw_status(self.transaction_hash)
+        self.status = status.get('status')
+        token_data = status.get('data')
+        
+        if token_data:
+            token = token_data.get('extra')
+
+        if self.status == "success" and token_data.get('extra'):
+            # todo: customize email
+            subject = "Transaction Success"
+            html_message = render_to_string(
+            'transaction_success.html',
+                {
+                    'token': token,
+                }
+            )
+            plain_message = strip_tags(html_message)
+            mail.send_mail(
+                subject, plain_message, "BitGifty <info@bitgifty.com>",
+                [email], html_message=html_message
+            )
+
+        if self.status != "success":
+            if self.status != "pending":
+                subject = "Withdrawal request failed"
                 html_message = render_to_string(
-                    'giftcard_redeem_v2.html',
+                'transaction_failed.html',
                     {
-                        'receipent_email': giftcard.receipent_email,
-                        'code': self.code,
-                        'note': note,
+                        'receipent_email': email,
+                        'amount': self.amount,
+                        'currency': self.currency,
                     }
                 )
-                    
                 plain_message = strip_tags(html_message)
                 mail.send_mail(
-                    subject, plain_message, f"BitGifty <{os.getenv('ADMIN_EMAIL')}>",
-                    [giftcard.receipent_email], html_message=html_message
+                    subject, plain_message, "BitGifty <info@bitgifty.com>",
+                    [email], html_message=html_message
                 )
-        except Exception as exception:
-            raise exceptions.ValidationError(exception)
-        return super(Redeem, self).save(*args, **kwargs)
+
+                client = Blockchain(key=os.getenv("TATUM_API_KEY"))
+                
+                network_mapping = {
+
+                    "bitcoin": {
+                        "virt": "BTC",
+                        "wallet": "Bitcoin",
+                    },
+                    "celo": {
+                        "virt": "CELO",
+                        "wallet": "Celo",
+                    },
+                    "naira": {
+                        "virt": "VC__BITGIFTY_NAIRA",
+                        "wallet": "VC__BITGIFTY_NAIRA",
+                    },
+                    "ceur": {
+                        "virt": "CEUR",
+                        "wallet": "celo",
+                    },
+                    "cusd": {
+                        "virt": "CUSD",
+                        "wallet": "celo",
+                    },
+                    "usdt_tron": {
+                        "virt": "USDT_TRON",
+                        "wallet": "tron"
+                    },
+                    "tron": {
+                        "virt": "TRON",
+                        "wallet": "tron"
+                    },
+                    "eth": {
+                        "virt": "ETH",
+                        "wallet": "ethereum"
+                    },
+                }
+
+                network = network_mapping[self.currency]["wallet"]
+                admin_wallet = AdminWallet.objects.get(
+                    owner__username="superman-houseboy",
+                    network=network
+                )
+
+                receipent = Wallet.objects.get(
+                    owner__email=email,
+                    network=network
+                )
+
+                client.send_token(
+                    receiver_address=self.wallet_address,
+                    network=network,
+                    amount=self.amount,
+                    private_key=client.decrypt_crendentails(admin_wallet.private_key),
+                    address=admin_wallet.address,
+                )
+                
+        self.save()
